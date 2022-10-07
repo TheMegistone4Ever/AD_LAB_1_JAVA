@@ -4,7 +4,7 @@ import java.util.PriorityQueue;
 import java.util.Random;
 
 public class EPMS  {
-    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
+    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 6; // Amount of temp aid files
 
     static long data_read = 0; // Total amount of read data
     static int next_run_element; // First element of next run
@@ -23,7 +23,7 @@ public class EPMS  {
 
     public static void main(String[] args) throws IOException {
         File main_file = initFile(working_dir + "main" + file_extension);
-        initSort(sortFileByChunks(main_file, (int) Math.min((main_file.length() >> 22), 4096)));
+        initSort(sortFileByChunks(main_file, (int) Math.min((main_file.length() >> 24), 4096)));
     }
 
     private static File sortFileByChunks(File target_file, int mb) throws IOException {
