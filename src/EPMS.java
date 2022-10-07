@@ -4,25 +4,26 @@ import java.util.PriorityQueue;
 import java.util.Random;
 
 public class EPMS  {
-    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 6; // Amount of temp aid files
+    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
+
     static long data_read = 0; // Total amount of read data
     static int next_run_element; // First element of next run
     static int output_file_index; // Index of current active output file where runs are being merged
     static int old_output_file_index; // Index of previous active output file (previous distribution level)
     static int runs_per_level; // Amount of runs on current distribution level
 
-    static int[] dummy_runs = new int[N]; // Array used to store dummy runs for each input file after distribute phase
-    static int[] distribution_array = new int[N]; // Array used to determine distribution of runs in input files
-    static boolean[] allow_read = new boolean[N]; // Array used as a marker for input file readers
-    static int[] last_elements = new int[N]; // All last elements of the current runs from each input file
-    static int[] run_last_elements = new int[N]; // Used to store all last elements of the current runs from each input file
-    static IntRecord[] next_run_first_elements = new IntRecord[N]; // used to store all first elements of the next runs from each input file
+    static int[] dummy_runs = new int[N + 1]; // Array used to store dummy runs for each input file after distribute phase
+    static int[] distribution_array = new int[N + 1]; // Array used to determine distribution of runs in input files
+    static boolean[] allow_read = new boolean[N + 1]; // Array used as a marker for input file readers
+    static int[] last_elements = new int[N + 1]; // All last elements of the current runs from each input file
+    static int[] run_last_elements = new int[N + 1]; // Used to store all last elements of the current runs from each input file
+    static IntRecord[] next_run_first_elements = new IntRecord[N + 1]; // used to store all first elements of the next runs from each input file
     static PriorityQueue<IntRecord> q = new PriorityQueue<>(); // Used to extract next minimum int that needs to be written to output file.
     static String file_extension = ".bin", working_dir = "src\\";
 
     public static void main(String[] args) throws IOException {
         File main_file = initFile(working_dir + "main" + file_extension);
-        initSort(sortFileByChunks(main_file, (int) Math.min(Math.max(1, main_file.length() >> 23), 4096)));
+        initSort(sortFileByChunks(main_file, (int) Math.min((main_file.length() >> 22), 4096)));
     }
 
     private static File sortFileByChunks(File target_file, int mb) throws IOException {
@@ -52,16 +53,14 @@ public class EPMS  {
     }
 
     private static void initSort(File main_file) throws IOException {
-        DataInputStream[] run_files_dis = new DataInputStream[N];
-        File[] working_files = new File[N];
+        DataInputStream[] run_files_dis = new DataInputStream[N + 1];
+        File[] working_files = new File[N + 1];
         for (int i = 0; i < working_files.length; i++)
             working_files[i] = new File(working_dir + "aid_temp_" + (i+1) + file_extension);
 
         distribute(N, working_files, main_file.length(), new DataInputStream(new FileInputStream(main_file)));
 
-        // START - polyphase merge
         long start = System.currentTimeMillis();
-
         int min_dummy_values = getMinDummyValue();
         initMergeProcedure(min_dummy_values);
         DataOutputStream dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
@@ -83,7 +82,6 @@ public class EPMS  {
         System.out.println("Merge phase done in " + (System.currentTimeMillis() - start) + " ms");
         closeAll(run_files_dis);
         clearTempFiles(main_file, working_files);
-        // END - polyphase merge
     }
 
     private static void distribute(int temp_files, File[] working_files, long main_file_length, DataInputStream main_file_dis) throws IOException {
@@ -125,8 +123,8 @@ public class EPMS  {
         IntRecord record;
         populateHeap(run_files_dis);
         while(heap_empty != min_file_values) {
-            record = q.poll();
-            writer.writeInt(record.getValue());
+            if ((record = q.poll()) != null) writer.writeInt(record.getValue());
+            else return;
             min_file = record.getFileIndex();
             if (allow_read[min_file] && (line = readFileLine(run_files_dis[min_file], min_file)) != INT_NULL)
                 q.add(new IntRecord(line, min_file));
