@@ -4,7 +4,7 @@ import java.util.PriorityQueue;
 import java.util.Random;
 
 public class EPMS  {
-    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 4; // Amount of temp aid files
+    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
 
     static long data_read = 0; // Total amount of read data
     static int next_run_element; // First element of next run
@@ -23,39 +23,32 @@ public class EPMS  {
 
     public static void main(String[] args) throws IOException {
         File main_file = initFile(working_dir + "main" + file_extension);
-        initSort(sortFileByChunks(main_file, (int) Math.min(main_file.length() >> 22, 1 << 9)));
+        initSort(sortFileByChunks(main_file, (int) Math.min(main_file.length() >> 2, 1 << 29)));
     }
 
-    private static File sortFileByChunks(File target_file, int mb) throws IOException {
+    private static File sortFileByChunks(File target_file, int bLen) throws IOException {
         File result_file = new File(target_file.getPath().replaceFirst(file_extension, "") + "_chunks" + file_extension);
         DataInputStream dis = new DataInputStream(new FileInputStream(target_file));
         DataOutputStream dos = new DataOutputStream(new FileOutputStream(result_file));
-        byte[] b = new byte[mb << 20];
-        int[] int_buff = new int[mb << 18];
+        byte[] b = new byte[bLen];
+        int[] int_buff = new int[bLen >> 2];
         long start = System.currentTimeMillis();
         while (dis.read(b) >= INT_SIZE) {
-            for (int i = 0; i < int_buff.length; i+=4)
+            for (int i = 0; i < int_buff.length; i += 4)
                 int_buff[i >> 2] = b[i] << 24 | (b[i + 1] & 0xFF) << 16 | (b[i + 2] & 0xFF) << 8 | (b[i + 3] & 0xFF);
             Arrays.sort(int_buff);
             dos.write(toByte(int_buff, INT_NULL));
         }
-        System.out.println("Sort file by chunks of " + mb + "MB phase done successfully in " + (System.currentTimeMillis()-start) + " ms");
+        System.out.println("Sort file by chunks of " + bLen + "B phase done successfully in " + (System.currentTimeMillis()-start) + " ms");
         dis.close();
         dos.close();
         return result_file;
     }
 
-    private static byte[] toByte(int[] data, int length) throws IOException {
-        ByteArrayOutputStream bos;
-        if (length == INT_NULL) {
-            bos = new ByteArrayOutputStream(data.length << 2);
-            DataOutputStream dos = new DataOutputStream(bos);
-            for (int datum : data) dos.writeInt(datum);
-        } else {
-            bos = new ByteArrayOutputStream(length << 2);
-            DataOutputStream dos = new DataOutputStream(bos);
-            for (int i = 0; i < length; i++) dos.writeInt(data[i]);
-        }
+    private static byte[] toByte(int[] d, int length) throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream(length = length == INT_NULL ? d.length : length << 2);
+        DataOutputStream dos = new DataOutputStream(bos);
+        for (int i = 0; i < length; i++) dos.writeInt(d[i]);
         return bos.toByteArray();
     }
 
@@ -329,6 +322,40 @@ public class EPMS  {
 
     private static void closeAll(Closeable[] c) throws IOException {for (Closeable o: c) o.close();}
 
+//    public static File initFile(String path) throws IOException {
+//        System.out.print("Бажаєте скористатися якимось файлом або згенерувати новий (0/1)? ");
+//        BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
+//        File data;
+//        if (Integer.parseInt(console.readLine()) == 1) {
+//            System.out.print("На скільки МБ ви бажаєте згенерувати чисел цілого типу? ");
+//            int mb = Integer.parseInt(console.readLine());
+//            DataOutputStream dos = new DataOutputStream(new FileOutputStream(data = new File(path)));
+//            Random random = new Random();
+//            System.out.println("Процес генерації нового файлу...");
+//            long start = System.currentTimeMillis();
+//            int mbInOneBlock = 1 << 8; // 256
+//
+//            if (mb <= mbInOneBlock) {
+//                int[] tmp = new int[mb << 18];
+//                for (int i = 0; i < mb << 18; i++) tmp[i] = random.nextInt(INT_NULL);
+//                dos.write(toByte(tmp, INT_NULL));
+//            } else {
+//                int[] tmp = new int[mbInOneBlock];
+//                for (int i = 0; i < (mb << 18) / mbInOneBlock; i++) {
+//                    for (int j = 0; j < mbInOneBlock; j++) tmp[j] = random.nextInt(INT_NULL);
+//                    dos.write(toByte(tmp, INT_NULL));
+//                }
+//            }
+//            System.out.println("Файл розміром " + mb + " МБ успішно згенеровано за " + (System.currentTimeMillis() - start) + " ms");
+//            dos.close();
+//        } else {
+//            System.out.print("Вкажіть шлях до файлу: ");
+//            data = new File(console.readLine());
+//        }
+//        console.close();
+//        return data;
+//    }
+
     public static File initFile(String path) throws IOException {
         System.out.print("Бажаєте скористатися якимось файлом або згенерувати новий (0/1)? ");
         BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
@@ -340,10 +367,18 @@ public class EPMS  {
             Random random = new Random();
             System.out.println("Процес генерації нового файлу...");
             long start = System.currentTimeMillis();
-            int[] tmp = new int[mb << 18];
-            for (int i = 0; i < mb << 18; i++)
-                tmp[i] = random.nextInt(INT_NULL);
-            dos.write(toByte(tmp, INT_NULL));
+            int mbInOneBlock = 1 << 8;
+            if (mb <= mbInOneBlock) {
+                int[] tmp = new int[mb << 18];
+                for (int i = 0; i < mb << 18; i++) tmp[i] = random.nextInt(INT_NULL);
+                dos.write(toByte(tmp, INT_NULL));
+            } else {
+                int[] tmp = new int[mbInOneBlock];
+                for (int i = 0; i < (mb << 18) / mbInOneBlock; i++) {
+                    for (int j = 0; j < mbInOneBlock; j++) tmp[j] = random.nextInt(INT_NULL);
+                    dos.write(toByte(tmp, INT_NULL));
+                }
+            }
             System.out.println("Файл розміром " + mb + " МБ успішно згенеровано за " + (System.currentTimeMillis()-start) + " ms");
             dos.close();
         } else {
