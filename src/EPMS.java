@@ -4,9 +4,15 @@ import java.util.PriorityQueue;
 import java.util.Random;
 
 public class EPMS  {
+    public record IntRecord(int value, int file_index) implements Comparable<IntRecord> {
+        public int getValue() {return value;}
+        public int getFileIndex() {return file_index;}
+        @Override public int compareTo(IntRecord o) {return Integer.compare(this.value, o.value);}
+    }
+
     static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
 
-    static long data_read = 0; // Total amount of read data
+    static long data_read; // Total amount of read data
     static int next_run_element; // First element of next run
     static int output_file_index; // Index of current active output file where runs are being merged
     static int old_output_file_index; // Index of previous active output file (previous distribution level)
@@ -21,9 +27,15 @@ public class EPMS  {
     static PriorityQueue<IntRecord> q = new PriorityQueue<>(); // Used to extract next minimum int that needs to be written to output file.
     static String file_extension = ".bin", working_dir = "src\\";
 
+    static byte[] writeBuffer = new byte[4];
+
     public static void main(String[] args) throws IOException {
+        System.out.print("Ви бажаєте з опитимізацією чи ні? ");
+        boolean isOptimized = Integer.parseInt(new BufferedReader(new InputStreamReader(System.in)).readLine()) > 0;
         File main_file = initFile(working_dir + "main" + file_extension);
-        initSort(sortFileByChunks(main_file, (int) Math.min(main_file.length() >> 2, 1 << 29)));
+        if (isOptimized)
+            initSort(sortFileByChunks(main_file, (int) Math.min(main_file.length() >> 3, 1 << 24)));
+        else initSort(main_file);
     }
 
     private static File sortFileByChunks(File target_file, int bLen) throws IOException {
@@ -57,31 +69,29 @@ public class EPMS  {
         File[] working_files = new File[N + 1];
         for (int i = 0; i < working_files.length; i++)
             working_files[i] = new File(working_dir + "aid_temp_" + (i+1) + file_extension);
-
         distribute(N, working_files, main_file.length(), new DataInputStream(new FileInputStream(main_file)));
-
         long start = System.currentTimeMillis();
-        int min_dummy_values = getMinDummyValue();
-        initMergeProcedure(min_dummy_values);
-        DataOutputStream dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
-        for (int i = 0; i < run_files_dis.length - 1; i++)
-            run_files_dis[i] = new DataInputStream(new FileInputStream(working_files[i]));
-        while (runs_per_level >= 0) {
-            last_elements[output_file_index] = INT_NULL;
-            merge(distribution_array[getMinFileIndex()] - min_dummy_values, run_files_dis, dos);
+            int min_dummy_values = getMinDummyValue();
+            initMergeProcedure(min_dummy_values);
+            DataOutputStream dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
+            for (int i = 0; i < run_files_dis.length - 1; i++)
+                run_files_dis[i] = new DataInputStream(new FileInputStream(working_files[i]));
+            while (runs_per_level >= 0) {
+                last_elements[output_file_index] = INT_NULL;
+                merge(distribution_array[getMinFileIndex()] - min_dummy_values, run_files_dis, dos);
 
-            setPreviousRunDistributionLevel();
-            updateOutputFileIndex();
-            resetAllowReadArray();
+                setPreviousRunDistributionLevel();
+                updateOutputFileIndex();
+                resetAllowReadArray();
 
-            min_dummy_values = getMinDummyValue();
-            dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
-            run_files_dis[old_output_file_index] = new DataInputStream(new FileInputStream(working_files[old_output_file_index]));
-        }
-        dos.close();
+                min_dummy_values = getMinDummyValue();
+                dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
+                run_files_dis[old_output_file_index] = new DataInputStream(new FileInputStream(working_files[old_output_file_index]));
+            }
+            dos.close();
         System.out.println("Merge phase done in " + (System.currentTimeMillis() - start) + " ms");
         closeAll(run_files_dis);
-        clearTempFiles(main_file, working_files);
+        outAidFiles(main_file, working_files);
     }
 
     private static void distribute(int temp_files, File[] working_files, long main_file_length, DataInputStream main_file_dis) throws IOException {
@@ -96,7 +106,7 @@ public class EPMS  {
         while (data_read < main_file_length) {
             for (int i=0; i < temp_files; i++)
                 while (write_sentinel[i] != distribution_array[i]) {
-                    while (runsMerged(main_file_length, i, next_run_element))
+                    while (data_read < main_file_length && next_run_element != INT_NULL && run_last_elements[i] <= next_run_element)
                         writeNextIntRun(main_file_length, main_file_dis, run_files_dos[i], i);
                     writeNextIntRun(main_file_length, main_file_dis, run_files_dos[i], i);
                     dummy_runs[i]++;
@@ -117,18 +127,16 @@ public class EPMS  {
     }
 
     private static void merge(int min_file_values, DataInputStream[] run_files_dis, DataOutputStream writer) throws IOException {
-        int line;
-        int min_file;
-        int heap_empty = 0;
+        int num, min_file, heap_empty = 0;
         IntRecord record;
         populateHeap(run_files_dis);
-        while(heap_empty != min_file_values) {
-            if ((record = q.poll()) != null) writer.writeInt(record.getValue());
-            else return;
+        while (heap_empty != min_file_values) {
+            if ((record = q.poll()) == null) return;
+            writer.writeInt(record.getValue());
             min_file = record.getFileIndex();
-            if (allow_read[min_file] && (line = readFileLine(run_files_dis[min_file], min_file)) != INT_NULL)
-                q.add(new IntRecord(line, min_file));
-            /* Once heap is empty all n-th runs have merged */
+            if (allow_read[min_file] && (num = readInt(run_files_dis[min_file], min_file)) != INT_NULL)
+                q.add(new IntRecord(num, min_file));
+            // Once heap is empty all n-th runs have merged
             if (q.size() == 0) {
                 heap_empty++;
                 for (int i = 0; i < next_run_first_elements.length; i++)
@@ -152,24 +160,22 @@ public class EPMS  {
     }
 
     private static void populateHeap(DataInputStream[] run_files_dis) throws IOException {
-        int line;
-        for (int i=0; i < run_files_dis.length; i++) {
+        int num;
+        for (int i = 0; i < run_files_dis.length; i++)
             if (dummy_runs[i] == 0) {
-                if (allow_read[i] && (line = readFileLine(run_files_dis[i], i)) != INT_NULL)
-                    q.add(new IntRecord(line, i));
+                if (allow_read[i] && (num = readInt(run_files_dis[i], i)) != INT_NULL) q.add(new IntRecord(num, i));
             } else dummy_runs[i]--;
-        }
     }
 
-    private static int readFileLine(DataInputStream file_dis, int file_index) throws IOException {
+    private static int readInt(DataInputStream file_dis, int file_index) throws IOException {
         try {
-            int current_int = file_dis.readInt();
+            if (file_dis.read(writeBuffer) < INT_SIZE) return INT_NULL;
+            int current_int = writeBuffer[0] << 24 | (writeBuffer[1] & 0xFF) << 16 | (writeBuffer[2] & 0xFF) << 8 | (writeBuffer[3] & 0xFF);
             if (last_elements[file_index] != INT_NULL && current_int != INT_NULL && current_int < last_elements[file_index]) {
                 next_run_first_elements[file_index] = new IntRecord(current_int, file_index);
                 allow_read[file_index] = false;
                 return INT_NULL;
-            } else last_elements[file_index] = current_int;
-            return current_int;
+            } return last_elements[file_index] = current_int; // return current_int;
         } catch (EOFException e) {
             return INT_NULL;
         }
@@ -197,76 +203,42 @@ public class EPMS  {
     }
 
     private static void writeNextIntRun(long main_file_length, DataInputStream main_file_dis, DataOutputStream run_file_dos, int file_index) throws IOException {
-//        int k = 0;
-//        int[] dos_list_i = new int[(int)(main_file_length >> 2)];
-//        try {
-//            if (data_read >= main_file_length) {dummy_runs[file_index]--; return;}
-//            if (next_run_element != INT_NULL) {
-//                dos_list_i[k++] = next_run_element;
-//                data_read += INT_SIZE;
-//            }
-//
-//            int min_value = Integer.MIN_VALUE;
-//            int current_int = main_file_dis.readInt();
-//            boolean single = true;
-//            /* Case if run is a single element: acordingly update variables and return */
-//            if (next_run_element != INT_NULL && current_int !=  INT_NULL) {
-//                if (next_run_element > current_int) {
-//                    run_last_elements[file_index] = next_run_element;
-//                    next_run_element = current_int;
-//                    single = false;
-//                }
-//            }
-//            if (single)
-//            while(current_int !=  INT_NULL) {
-//                    if (current_int >= min_value) {
-//                        dos_list_i[k++] = current_int;
-//                        data_read += INT_SIZE;
-//                        min_value = current_int;
-//                        current_int = main_file_dis.readInt();
-//                    } else {
-//                        next_run_element = current_int;
-//                        run_last_elements[file_index] = min_value;
-//                        break;
-//                    }
-//                }
-//        } catch (EOFException e) {
-//        } finally {if (k != 0) run_file_dos.write(toByte(dos_list_i, k-1));}
-        try {
-            if (data_read >= main_file_length) {dummy_runs[file_index]--; return;}
-            if (next_run_element != INT_NULL) {
-                run_file_dos.writeInt(next_run_element);
-                data_read += INT_SIZE;
-            }
+        if (data_read >= main_file_length) {dummy_runs[file_index]--; return;}
+        if (next_run_element != INT_NULL) {
+            run_file_dos.writeInt(next_run_element);
+            data_read += INT_SIZE;
+        }
 
-            int min_value = Integer.MIN_VALUE;
-            int current_int = main_file_dis.readInt();
+        int min_value = Integer.MIN_VALUE;
+        if (main_file_dis.read(writeBuffer) < INT_SIZE) return;
+
+        int current_int = buffToInt();
 
             /* Case if run is a single element: acordingly update variables and return */
-            if (next_run_element != INT_NULL && current_int !=  INT_NULL)
-                if (next_run_element > current_int) {
-                    run_last_elements[file_index] = next_run_element;
-                    next_run_element = current_int;
-                    return;
-                }
-
-            while(current_int !=  INT_NULL) {
-                if (current_int >= min_value) {
-                    run_file_dos.writeInt(current_int);
-                    data_read += INT_SIZE;
-                    min_value = current_int;
-                    current_int = main_file_dis.readInt();
-                } else {
-                    next_run_element = current_int;
-                    run_last_elements[file_index] = min_value;
-                    return;
-                }
+        if (next_run_element != INT_NULL && current_int !=  INT_NULL)
+            if (next_run_element > current_int) {
+                run_last_elements[file_index] = next_run_element;
+                next_run_element = current_int;
+                return;
             }
-        } catch (EOFException e) {}
+
+        while(current_int !=  INT_NULL) {
+            if (current_int >= min_value) {
+                run_file_dos.writeInt(current_int);
+                data_read += INT_SIZE;
+                min_value = current_int;
+                if (main_file_dis.read(writeBuffer) < INT_SIZE) break;
+                current_int = buffToInt();
+            } else {
+                next_run_element = current_int;
+                run_last_elements[file_index] = min_value;
+                break;
+            }
+        }
     }
 
-    private static boolean runsMerged(long main_file_length, int file_index, int first_element) {
-        return data_read < main_file_length && first_element != INT_NULL && run_last_elements[file_index] <= first_element;
+    private static int buffToInt() {
+        return writeBuffer[0] << 24 | (writeBuffer[1] & 0xFF) << 16 | (writeBuffer[2] & 0xFF) << 8 | (writeBuffer[3] & 0xFF);
     }
 
     private static void setNextDistributionLevel() {
@@ -295,87 +267,45 @@ public class EPMS  {
             dummy_runs[i] = distribution_array[i] - dummy_runs[i];
     }
 
-    private static void clearTempFiles(File main_file, File[] temp_files) throws IOException {
+    private static void outAidFiles(File main_file, File[] temp_files) throws IOException {
         for (File temp_file : temp_files) {
             System.out.print("MAIN LEN: " + main_file.length() + " - TEMP LEN: " + temp_file.length());
-            if (temp_file.length() != 0) {
-                temp_file.renameTo(new File(working_dir + "sorted" + file_extension));
-                System.out.println(" - Is file " + temp_file.getName() + " sorted? - " + isFileSorted(temp_file));
-            } else {
-                temp_file.delete();
-                System.out.println(" - Delete temp file: " + temp_file.getName());
-            }
+            System.out.println(temp_file.length() != 0 ? " - Is file " + temp_file.getName() + " sorted? - " + isFileSorted(temp_file) : "");
         }
     }
 
     private static boolean isFileSorted(File temp_file) throws IOException {
         DataInputStream dis = new DataInputStream(new FileInputStream(temp_file));
-        try {
-            int first = dis.readInt(); //4 bytes
-            dis.skip(temp_file.length() - 2 << 2); // 4 first and 4 last bytes reserve for last int
-            int last = dis.readInt();
-            if (first > last) return false;
-        } catch (EOFException e) {}
+        if (dis.read(writeBuffer) < INT_SIZE) return false;
+        int first = buffToInt();
+        if (dis.skip(temp_file.length() - 8) <= 0) return false;
+        if (dis.read(writeBuffer) < INT_SIZE) return false;
+        if (first > buffToInt()) return false;
         dis.close();
         return true;
     }
 
     private static void closeAll(Closeable[] c) throws IOException {for (Closeable o: c) o.close();}
 
-//    public static File initFile(String path) throws IOException {
-//        System.out.print("Бажаєте скористатися якимось файлом або згенерувати новий (0/1)? ");
-//        BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
-//        File data;
-//        if (Integer.parseInt(console.readLine()) == 1) {
-//            System.out.print("На скільки МБ ви бажаєте згенерувати чисел цілого типу? ");
-//            int mb = Integer.parseInt(console.readLine());
-//            DataOutputStream dos = new DataOutputStream(new FileOutputStream(data = new File(path)));
-//            Random random = new Random();
-//            System.out.println("Процес генерації нового файлу...");
-//            long start = System.currentTimeMillis();
-//            int mbInOneBlock = 1 << 8; // 256
-//
-//            if (mb <= mbInOneBlock) {
-//                int[] tmp = new int[mb << 18];
-//                for (int i = 0; i < mb << 18; i++) tmp[i] = random.nextInt(INT_NULL);
-//                dos.write(toByte(tmp, INT_NULL));
-//            } else {
-//                int[] tmp = new int[mbInOneBlock];
-//                for (int i = 0; i < (mb << 18) / mbInOneBlock; i++) {
-//                    for (int j = 0; j < mbInOneBlock; j++) tmp[j] = random.nextInt(INT_NULL);
-//                    dos.write(toByte(tmp, INT_NULL));
-//                }
-//            }
-//            System.out.println("Файл розміром " + mb + " МБ успішно згенеровано за " + (System.currentTimeMillis() - start) + " ms");
-//            dos.close();
-//        } else {
-//            System.out.print("Вкажіть шлях до файлу: ");
-//            data = new File(console.readLine());
-//        }
-//        console.close();
-//        return data;
-//    }
-
     public static File initFile(String path) throws IOException {
         System.out.print("Бажаєте скористатися якимось файлом або згенерувати новий (0/1)? ");
         BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
         File data;
-        if (Integer.parseInt(console.readLine()) == 1) {
+        if (Integer.parseInt(console.readLine()) > 0) {
             System.out.print("На скільки МБ ви бажаєте згенерувати чисел цілого типу? ");
             int mb = Integer.parseInt(console.readLine());
             DataOutputStream dos = new DataOutputStream(new FileOutputStream(data = new File(path)));
             Random random = new Random();
             System.out.println("Процес генерації нового файлу...");
             long start = System.currentTimeMillis();
-            int mbInOneBlock = 1 << 8;
-            if (mb <= mbInOneBlock) {
+            if (mb <= 1 << 8) {
                 int[] tmp = new int[mb << 18];
                 for (int i = 0; i < mb << 18; i++) tmp[i] = random.nextInt(INT_NULL);
                 dos.write(toByte(tmp, INT_NULL));
             } else {
-                int[] tmp = new int[mbInOneBlock];
-                for (int i = 0; i < (mb << 18) / mbInOneBlock; i++) {
-                    for (int j = 0; j < mbInOneBlock; j++) tmp[j] = random.nextInt(INT_NULL);
+                int[] tmp = new int[1 << 8];
+                for (int i = 0; i < mb << 10; i++) {
+                    for (int j = 0; j < 1 << 8; j++) tmp[j] = random.nextInt(INT_NULL);
                     dos.write(toByte(tmp, INT_NULL));
                 }
             }
