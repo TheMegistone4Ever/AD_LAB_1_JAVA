@@ -27,13 +27,14 @@ public class EPMS  {
     static PriorityQueue<IntRecord> q = new PriorityQueue<>(); // Used to extract next minimum int that needs to be written to output file.
     static byte[] writeBuffer = new byte[4];
 
+    static long mainFileLength;
+
     public static void main(String[] args) throws IOException {
         System.out.print("Ви бажаєте з опитимізацією чи ні? ");
         boolean isOptimized = Integer.parseInt(new BufferedReader(new InputStreamReader(System.in)).readLine()) > 0;
-        File main_file = initFile( "main.bin");
-        if (isOptimized)
-            initSort(sortFileByChunks(main_file, (int) Math.min(main_file.length() >> 3, 1 << 24)));
-        else initSort(main_file);
+        File file = initFile( "main.bin");
+        mainFileLength = file.length();
+        initSort(isOptimized ? sortFileByChunks(file, (int)Math.min(file.length() >> 3, 1 << 24)) : file);
     }
 
     private static File sortFileByChunks(File target_file, int bLen) throws IOException {
@@ -65,7 +66,7 @@ public class EPMS  {
         File[] working_files = new File[N + 1];
         for (int i = 0; i < working_files.length; i++)
             working_files[i] = new File("aid_temp_" + (i+1) + ".bin");
-        distribute(N, working_files, main_file.length(), new DataInputStream(new FileInputStream(main_file)));
+        distribute(N, working_files, new DataInputStream(new FileInputStream(main_file)));
         long start = System.currentTimeMillis();
             int min_dummy_values = getMinDummyValue();
             initMergeProcedure(min_dummy_values);
@@ -76,7 +77,7 @@ public class EPMS  {
                 last_elements[output_file_index] = INT_NULL;
                 merge(distribution_array[getMinFileIndex()] - min_dummy_values, run_files_dis, dos);
                 setPreviousRunDistributionLevel();
-                updateOutputFileIndex();
+                output_file_index = (output_file_index > 0 ? output_file_index : distribution_array.length) - 1;
                 resetAllowReadArray();
                 min_dummy_values = getMinDummyValue();
                 dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
@@ -88,7 +89,7 @@ public class EPMS  {
         outAidFiles(main_file, working_files);
     }
 
-    private static void distribute(int temp_files, File[] working_files, long main_file_length, DataInputStream main_file_dis) throws IOException {
+    private static void distribute(int temp_files, File[] working_files, DataInputStream main_file_dis) throws IOException {
         long start = System.currentTimeMillis();
         runs_per_level = 1;
         distribution_array[0] = 1;
@@ -97,12 +98,12 @@ public class EPMS  {
         DataOutputStream[] run_files_dos = new DataOutputStream[temp_files];
         for (int i=0; i < temp_files; i++)
             run_files_dos[i] = new DataOutputStream(new FileOutputStream(working_files[i]));
-        while (data_read < main_file_length) {
+        while (data_read < mainFileLength) {
             for (int i=0; i < temp_files; i++)
                 while (write_sentinel[i] != distribution_array[i]) {
-                    while (data_read < main_file_length && next_run_element != INT_NULL && run_last_elements[i] <= next_run_element)
-                        writeNextIntRun(main_file_length, main_file_dis, run_files_dos[i], i);
-                    writeNextIntRun(main_file_length, main_file_dis, run_files_dos[i], i);
+                    while (data_read < mainFileLength && next_run_element != INT_NULL && run_last_elements[i] <= next_run_element)
+                        writeNextIntRun(main_file_dis, run_files_dos[i], i);
+                    writeNextIntRun(main_file_dis, run_files_dos[i], i);
                     dummy_runs[i]++;
                     write_sentinel[i]++;
                 }
@@ -147,15 +148,10 @@ public class EPMS  {
         }
     }
 
-    private static void updateOutputFileIndex() {
-        if (output_file_index > 0) output_file_index--;
-        else output_file_index = distribution_array.length - 1;
-    }
-
     private static void populateHeap(DataInputStream[] run_files_dis) throws IOException {
-        for (int i = 0, num; i < run_files_dis.length; i++)
+        for (int i = 0; i < run_files_dis.length; i++)
             if (dummy_runs[i] == 0) {
-                if (allow_read[i] && (num = readInt(run_files_dis[i], i)) != INT_NULL) q.add(new IntRecord(num, i));
+                if (allow_read[i]) q.add(new IntRecord(readInt(run_files_dis[i], i), i));
             } else dummy_runs[i]--;
     }
 
@@ -192,8 +188,8 @@ public class EPMS  {
         return min_file_index;
     }
 
-    private static void writeNextIntRun(long main_file_length, DataInputStream main_file_dis, DataOutputStream run_file_dos, int file_index) throws IOException {
-        if (data_read >= main_file_length) {dummy_runs[file_index]--; return;}
+    private static void writeNextIntRun(DataInputStream main_file_dis, DataOutputStream run_file_dos, int file_index) throws IOException {
+        if (data_read >= mainFileLength) {dummy_runs[file_index]--; return;}
         if (next_run_element != INT_NULL) {
             run_file_dos.writeInt(next_run_element);
             data_read += INT_SIZE;
@@ -225,18 +221,17 @@ public class EPMS  {
 
     private static void setNextDistributionLevel() {
         runs_per_level = 0;
-        int[] current_distribution_array = distribution_array.clone();
-        for (int i = 0; i < current_distribution_array.length - 1; runs_per_level += distribution_array[++i])
-            distribution_array[i] = current_distribution_array[0] + current_distribution_array[i+1];
+        int[] clone = distribution_array.clone();
+        for (int i = 0; i < clone.length - 1; runs_per_level += distribution_array[++i])
+            distribution_array[i] = clone[0] + clone[i+1];
     }
 
     private static void setPreviousRunDistributionLevel() {
-        int[] current_distribution_array = distribution_array.clone();
-        int last = current_distribution_array[current_distribution_array.length - 2];
+        int[] clone = distribution_array.clone();
         old_output_file_index = output_file_index;
-        distribution_array[0] = runs_per_level = last;
-        for (int diff, i = current_distribution_array.length - 3; i >= 0; i--, runs_per_level += diff)
-            distribution_array[i+1] = (diff = current_distribution_array[i] - last);
+        distribution_array[0] = runs_per_level = clone[clone.length - 2];
+        for (int diff, i = clone.length - 3; i >= 0; i--, runs_per_level += diff)
+            distribution_array[i+1] = diff = clone[i] - clone[clone.length - 2];
     }
 
     private static void outAidFiles(File main_file, File[] temp_files) throws IOException {
@@ -252,9 +247,8 @@ public class EPMS  {
         int first = buffToInt();
         if (dis.skip(temp_file.length() - 8) <= 0) return false;
         if (dis.read(writeBuffer) < INT_SIZE) return false;
-        if (first > buffToInt()) return false;
         dis.close();
-        return true;
+        return first <= buffToInt();
     }
 
     private static void closeAll(Closeable[] c) throws IOException {for (Closeable o: c) o.close();}
