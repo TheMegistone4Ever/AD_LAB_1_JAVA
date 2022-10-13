@@ -10,7 +10,7 @@ public class EPMS  {
         @Override public int compareTo(IntRecord o) {return Integer.compare(this.value, o.value);}
     }
 
-    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
+    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 6; // Amount of temp aid files
 
     static long data_read; // Total amount of read data
     static int next_run_element; // First element of next run
@@ -34,7 +34,7 @@ public class EPMS  {
         boolean isOptimized = Integer.parseInt(new BufferedReader(new InputStreamReader(System.in)).readLine()) > 0;
         File file = initFile( "main.bin");
         mainFileLength = file.length();
-        initSort(isOptimized ? sortFileByChunks(file, (int)Math.min(file.length() >> 3, 1 << 24)) : file);
+        ExternalPolyphaseMergesort(isOptimized ? sortFileByChunks(file, (int)Math.min(file.length() >> 3, 1 << 24)) : file);
     }
 
     private static File sortFileByChunks(File target_file, int bLen) throws IOException {
@@ -61,7 +61,7 @@ public class EPMS  {
         return bos.toByteArray();
     }
 
-    private static void initSort(File main_file) throws IOException {
+    private static void ExternalPolyphaseMergesort(File main_file) throws IOException {
         DataInputStream[] run_files_dis = new DataInputStream[N + 1];
         File[] working_files = new File[N + 1];
         for (int i = 0; i < working_files.length; i++)
@@ -73,7 +73,7 @@ public class EPMS  {
             DataOutputStream dos = new DataOutputStream(new FileOutputStream(working_files[output_file_index]));
             for (int i = 0; i < run_files_dis.length - 1; i++)
                 run_files_dis[i] = new DataInputStream(new FileInputStream(working_files[i]));
-            while (runs_per_level >= 0) {
+            while (runs_per_level > 0) {
                 last_elements[output_file_index] = INT_NULL;
                 merge(distribution_array[getMinFileIndex()] - min_dummy_values, run_files_dis, dos);
                 setPreviousRunDistributionLevel();
