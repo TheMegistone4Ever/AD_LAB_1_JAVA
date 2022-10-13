@@ -10,7 +10,7 @@ public class EPMS  {
         @Override public int compareTo(IntRecord o) {return Integer.compare(this.value, o.value);}
     }
 
-    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 6; // Amount of temp aid files
+    static int INT_NULL = Integer.MAX_VALUE, INT_SIZE = 4, N = 5; // Amount of temp aid files
 
     static long data_read; // Total amount of read data
     static int next_run_element; // First element of next run
